@@ -51,25 +51,33 @@
             /* Top layer initially */
             text-align: left;
             /* Type from left to right */
+            padding: 15px;
+            box-sizing: border-box;
+            word-break: break-word;
+            overflow-wrap: break-word;
         }
 
-        /* Custom Cursor Style */
+        /* Custom Cursor Canvas */
         #custom-cursor {
             display: none;
-            /* Hidden by default */
             position: absolute;
             top: 0;
             left: 0;
             width: 25px;
             height: 25px;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ff0055'%3E%3Cpath d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'/%3E%3C/svg%3E");
-            background-size: cover;
             pointer-events: none;
             z-index: 9999;
-            transform: translate(-50%, -50%);
-            /* Center on mouse */
-            filter: drop-shadow(0 0 5px #ff0055);
-            transition: transform 0.1s ease;
+        }
+
+        #cursorCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 9998;
+            display: none;
         }
 
         .cursor {
@@ -129,12 +137,55 @@
             transition: opacity 2s ease-in;
             pointer-events: none;
         }
+
+        /* MOBILE RESPONSIVE */
+        @media (max-width: 768px) {
+            #terminal {
+                font-size: 0.95rem;
+                width: 85%;
+                line-height: 1.4;
+                padding: 12px;
+            }
+
+            .error-text {
+                font-size: 1.2rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            #terminal {
+                font-size: 0.8rem;
+                width: 88%;
+                line-height: 1.3;
+                padding: 10px;
+            }
+
+            .error-text {
+                font-size: 1rem;
+            }
+        }
+
+        /* Hide cursor & spotlight on touch devices */
+        @media (hover: none) and (pointer: coarse) {
+            #custom-cursor {
+                display: none !important;
+            }
+
+            #spotlightCanvas {
+                display: none !important;
+            }
+
+            body {
+                cursor: auto !important;
+            }
+        }
     </style>
 </head>
 
 <body>
 
     <div id="custom-cursor"></div>
+    <canvas id="cursorCanvas"></canvas>
     <canvas id="bgCanvas"></canvas>
 
     <div id="terminal">
@@ -164,8 +215,8 @@
                 background: "#000000",
                 text: "#0f0",
                 heart: "#ff3366",
-                // Falling hearts palette (reds, pinks)
-                fallingHearts: ["#ff3366", "#ff66b2", "#ff99cc", "#ffcccc", "#cc0044"]
+                // Rose petal palette (soft pinks, reds, whites)
+                petals: ["#ff6b8a", "#ff8fa3", "#ffb3c1", "#f4a0b5", "#e8556d", "#fcd5ce", "#fff0f3", "#c9184a"]
             }
         };
 
@@ -176,86 +227,279 @@
         const mouse = { x: -1000, y: -1000 };
         const customCursor = document.getElementById('custom-cursor');
 
+        // Cursor trail state
+        const cursorCanvas = document.getElementById('cursorCanvas');
+        const cCtx = cursorCanvas.getContext('2d');
+        let cursorTrail = [];
+        let cursorActive = false;
+        let lastMouseMove = 0;
+
         window.addEventListener('mousemove', (e) => {
             mouse.x = e.clientX;
             mouse.y = e.clientY;
+            lastMouseMove = Date.now();
 
-            // Move Custom Cursor
-            customCursor.style.left = mouse.x + 'px';
-            customCursor.style.top = mouse.y + 'px';
-
-            // Spawn trail particles on move
-            // spawnTrail(mouse.x, mouse.y); // Removed for cleaner look in dark mode
+            // Add trail point
+            if (cursorActive) {
+                cursorTrail.push({
+                    x: mouse.x,
+                    y: mouse.y,
+                    life: 1.0,
+                    size: 3 + Math.random() * 2
+                });
+                // Limit trail length
+                if (cursorTrail.length > 30) cursorTrail.shift();
+            }
         });
 
-        // Add "heat" pulsing effect via JS for smoother feel or keep CSS
-        customCursor.style.animation = "pulse 1.5s infinite";
+        // Draw heart shape on canvas at position
+        function drawCursorHeart(ctx, x, y, size, color, alpha) {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.translate(x, y);
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(0, -size * 0.35);
+            ctx.bezierCurveTo(-size * 0.5, -size, -size, -size * 0.3, 0, size * 0.5);
+            ctx.bezierCurveTo(size, -size * 0.3, size * 0.5, -size, 0, -size * 0.35);
+            ctx.fill();
+            ctx.restore();
+        }
 
-        // Inject Pulse Keyframes dynamically
+        function animateCursor() {
+            if (!cursorActive) return;
+
+            cCtx.clearRect(0, 0, width, height);
+            const time = Date.now() * 0.001;
+
+            // 1. Fading trail of mini hearts
+            cursorTrail.forEach((pt, i) => {
+                pt.life -= 0.03;
+                if (pt.life > 0) {
+                    const trailSize = pt.size * pt.life;
+                    const hue = 340 + (i * 2) % 30; // Vary pink shades
+                    drawCursorHeart(cCtx, pt.x, pt.y, trailSize, `hsla(${hue}, 100%, 65%, ${pt.life * 0.6})`, pt.life * 0.5);
+                }
+            });
+            cursorTrail = cursorTrail.filter(p => p.life > 0);
+
+            // 2. Soft glow ring around cursor
+            const glowRadius = 30 + Math.sin(time * 3) * 5;
+            const glowGrad = cCtx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, glowRadius);
+            glowGrad.addColorStop(0, 'rgba(255, 0, 85, 0.15)');
+            glowGrad.addColorStop(0.5, 'rgba(255, 0, 85, 0.05)');
+            glowGrad.addColorStop(1, 'rgba(255, 0, 85, 0)');
+            cCtx.fillStyle = glowGrad;
+            cCtx.beginPath();
+            cCtx.arc(mouse.x, mouse.y, glowRadius, 0, Math.PI * 2);
+            cCtx.fill();
+
+            // 3. Orbiting tiny sparkle dots
+            for (let i = 0; i < 3; i++) {
+                const orbitAngle = time * (1.5 + i * 0.5) + (i * Math.PI * 2 / 3);
+                const orbitRadius = 15 + Math.sin(time * 2 + i) * 4;
+                const ox = mouse.x + Math.cos(orbitAngle) * orbitRadius;
+                const oy = mouse.y + Math.sin(orbitAngle) * orbitRadius;
+                const sparkAlpha = 0.5 + Math.sin(time * 4 + i) * 0.3;
+
+                cCtx.save();
+                cCtx.globalAlpha = sparkAlpha;
+                cCtx.fillStyle = '#ffccdd';
+                cCtx.shadowColor = '#ff6699';
+                cCtx.shadowBlur = 6;
+                cCtx.beginPath();
+                cCtx.arc(ox, oy, 1.5, 0, Math.PI * 2);
+                cCtx.fill();
+                cCtx.restore();
+            }
+
+            // 4. Main heart with realistic heartbeat
+            // Heartbeat: two quick bumps then pause (lub-dub pattern)
+            const beatCycle = time * 1.8 % 1; // 0 to 1 cycle
+            let beatScale = 1;
+            if (beatCycle < 0.1) {
+                beatScale = 1 + Math.sin(beatCycle / 0.1 * Math.PI) * 0.25; // First bump (lub)
+            } else if (beatCycle > 0.15 && beatCycle < 0.25) {
+                beatScale = 1 + Math.sin((beatCycle - 0.15) / 0.1 * Math.PI) * 0.15; // Second bump (dub)
+            }
+
+            const heartSize = 12 * beatScale;
+
+            // Heart shadow/glow intensifies with beat
+            cCtx.save();
+            cCtx.shadowColor = '#ff0055';
+            cCtx.shadowBlur = 10 + (beatScale - 1) * 40;
+            drawCursorHeart(cCtx, mouse.x, mouse.y, heartSize, '#ff0055', 1);
+            cCtx.restore();
+
+            // Inner highlight for depth
+            drawCursorHeart(cCtx, mouse.x - 1, mouse.y - 2, heartSize * 0.4, '#ff6699', 0.6);
+
+            requestAnimationFrame(animateCursor);
+        }
+
+        function activateCursorAnimation() {
+            cursorCanvas.width = width;
+            cursorCanvas.height = height;
+            cursorCanvas.style.display = 'block';
+            cursorActive = true;
+            animateCursor();
+        }
+
+        // Inject styles
         const styleSheet = document.createElement("style");
         styleSheet.innerText = `
-            @keyframes pulse {
-                0% { transform: translate(-50%, -50%) scale(1); filter: drop-shadow(0 0 5px #ff0055); }
-                50% { transform: translate(-50%, -50%) scale(1.2); filter: drop-shadow(0 0 15px #ff0055); }
-                100% { transform: translate(-50%, -50%) scale(1); filter: drop-shadow(0 0 5px #ff0055); }
-            }
-            body { cursor: none; } /* Hide default cursor */
+            body { cursor: none; }
             #spotlightCanvas {
                 position: absolute;
                 top: 0;
                 left: 0;
                 width: 100%;
                 height: 100%;
-                z-index: 200; /* Above terminal (100) and heartCanvas (50) */
-                pointer-events: none; /* Let clicks pass through */
+                z-index: 200;
+                pointer-events: none;
             }
         `;
         document.head.appendChild(styleSheet);
 
         const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+        // Detect touch devices (tablets & mobiles)
+        const isTouchDevice = ('ontouchstart' in window) ||
+            (navigator.maxTouchPoints > 0) ||
+            (window.matchMedia('(hover: none) and (pointer: coarse)').matches);
+
+        if (isTouchDevice) {
+            // Hide custom cursor on touch devices
+            customCursor.style.display = 'none';
+            document.body.style.cursor = 'auto';
+        }
+
         /***************************************************
-         * FALLING HEARTS BACKGROUND
+         * FALLING ROSE PETALS BACKGROUND
          ***************************************************/
         const bgCanvas = document.getElementById('bgCanvas');
         const bgCtx = bgCanvas.getContext('2d');
-        let fallingHearts = [];
+        let fallingPetals = [];
+        let sparkles = [];
 
-        class FallingHeart {
+        // Heart zone detection (set after particles init)
+        let heartZone = { cx: 0, cy: 0, radius: 0 };
+
+        class Sparkle {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 3 + 1;
+                this.life = 1.0;
+                this.decay = 0.02 + Math.random() * 0.03;
+                this.vx = (Math.random() - 0.5) * 3;
+                this.vy = (Math.random() - 0.5) * 3;
+                this.color = Math.random() > 0.5 ? '#ffe6f0' : '#ffb3d0';
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vx *= 0.96;
+                this.vy *= 0.96;
+                this.life -= this.decay;
+            }
+            draw(ctx) {
+                if (this.life <= 0) return;
+                ctx.save();
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.shadowColor = this.color;
+                ctx.shadowBlur = 8;
+                // Draw a tiny star/diamond
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                // Cross sparkle lines
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 0.5;
+                const s = this.size * 2.5;
+                ctx.beginPath();
+                ctx.moveTo(this.x - s, this.y);
+                ctx.lineTo(this.x + s, this.y);
+                ctx.moveTo(this.x, this.y - s);
+                ctx.lineTo(this.x, this.y + s);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        class RosePetal {
             constructor() {
-                this.init(false); // Start from top by default
+                this.init(false);
             }
 
             init(randomY = false) {
                 this.x = Math.random() * width;
-                this.y = randomY ? Math.random() * height : -30;
-                this.size = Math.random() * 10 + 5; // Heart size
-                this.speed = Math.random() * 2 + 1;
-                this.color = CONFIG.colors.fallingHearts[Math.floor(Math.random() * CONFIG.colors.fallingHearts.length)];
+                this.y = randomY ? Math.random() * height : -(Math.random() * 60 + 20);
+                // Scale petal size for smaller screens
+                const sizeBase = Math.min(width, height);
+                const sizeFactor = sizeBase < 500 ? 0.5 : sizeBase < 800 ? 0.7 : 1;
+                this.size = (Math.random() * 12 + 8) * sizeFactor;
+                this.speed = Math.random() * 1.2 + 0.4;
+                this.color = CONFIG.colors.petals[Math.floor(Math.random() * CONFIG.colors.petals.length)];
                 this.angle = Math.random() * Math.PI * 2;
-                this.spinSpeed = (Math.random() - 0.5) * 0.05;
-
+                this.spinSpeed = (Math.random() - 0.5) * 0.02;
+                this.swayPhase = Math.random() * Math.PI * 2;
+                this.swaySpeed = 0.01 + Math.random() * 0.015;
+                this.swayAmplitude = 0.5 + Math.random() * 1;
+                // 3D tilt simulation
+                this.tiltAngle = Math.random() * Math.PI;
+                this.tiltSpeed = 0.005 + Math.random() * 0.01;
+                this.opacity = 0.6 + Math.random() * 0.4;
+                // Curl factor for petal shape variety
+                this.curlFactor = 0.3 + Math.random() * 0.5;
                 // Repulsion physics
                 this.vx = 0;
                 this.vy = 0;
+                // Track if already sparkled
+                this.sparkled = false;
             }
 
             update() {
-                // Gravity
+                // Gentle gravity
                 this.y += this.speed;
                 this.angle += this.spinSpeed;
+                this.tiltAngle += this.tiltSpeed;
+
+                // Gentle swaying side-to-side like a real petal
+                this.swayPhase += this.swaySpeed;
+                this.x += Math.sin(this.swayPhase) * this.swayAmplitude;
 
                 // Mouse Repulsion
                 const dx = this.x - mouse.x;
                 const dy = this.y - mouse.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                const repelRadius = 150;
+                const repelRadius = 120;
 
                 if (dist < repelRadius) {
                     const force = (repelRadius - dist) / repelRadius;
                     const angle = Math.atan2(dy, dx);
-                    this.vx += Math.cos(angle) * force * 2;
-                    this.vy += Math.sin(angle) * force * 2;
+                    this.vx += Math.cos(angle) * force * 1.5;
+                    this.vy += Math.sin(angle) * force * 1.5;
+                }
+
+                // Heart zone sparkle effect
+                if (heartZone.radius > 0 && !this.sparkled) {
+                    const hdx = this.x - heartZone.cx;
+                    const hdy = this.y - heartZone.cy;
+                    const hdist = Math.sqrt(hdx * hdx + hdy * hdy);
+                    if (hdist < heartZone.radius && hdist > heartZone.radius * 0.3) {
+                        this.sparkled = true;
+                        // Burst of sparkles!
+                        for (let i = 0; i < 5; i++) {
+                            sparkles.push(new Sparkle(this.x, this.y));
+                        }
+                        // Petal gets a gentle push outward
+                        const pushAngle = Math.atan2(hdy, hdx);
+                        this.vx += Math.cos(pushAngle) * 2;
+                        this.vy += Math.sin(pushAngle) * 1;
+                    }
                 }
 
                 // Apply velocities
@@ -265,66 +509,89 @@
                 this.vy *= 0.95;
 
                 // Reset
-                if (this.y > height + 30) {
+                if (this.y > height + 40) {
                     this.init(false);
                 }
-                if (this.x > width + 30) this.x = -30;
-                if (this.x < -30) this.x = width + 30;
+                if (this.x > width + 40) this.x = -40;
+                if (this.x < -40) this.x = width + 40;
             }
 
             draw() {
                 bgCtx.save();
                 bgCtx.translate(this.x, this.y);
                 bgCtx.rotate(this.angle);
-                bgCtx.fillStyle = this.color;
+                // Simulate 3D tilt by scaling x-axis
+                const tiltScale = 0.4 + Math.abs(Math.sin(this.tiltAngle)) * 0.6;
+                bgCtx.scale(tiltScale, 1);
+                bgCtx.globalAlpha = this.opacity;
 
-                // Draw Heart Shape
+                // Draw realistic rose petal shape
+                const s = this.size;
                 bgCtx.beginPath();
-                const topCurveHeight = this.size * 0.3;
-                bgCtx.moveTo(0, topCurveHeight);
-                // Top left curve
+                bgCtx.moveTo(0, -s);
                 bgCtx.bezierCurveTo(
-                    0, 0,
-                    -this.size / 2, 0,
-                    -this.size / 2, topCurveHeight
+                    s * 0.8, -s * 0.8,
+                    s * this.curlFactor, s * 0.3,
+                    0, s * 0.6
                 );
-                // Bottom left curve
                 bgCtx.bezierCurveTo(
-                    -this.size / 2, (this.size + topCurveHeight) / 2,
-                    0, (this.size + topCurveHeight) / 2,
-                    0, this.size
+                    -s * this.curlFactor, s * 0.3,
+                    -s * 0.8, -s * 0.8,
+                    0, -s
                 );
-                // Bottom right curve
-                bgCtx.bezierCurveTo(
-                    0, (this.size + topCurveHeight) / 2,
-                    this.size / 2, (this.size + topCurveHeight) / 2,
-                    this.size / 2, topCurveHeight
-                );
-                // Top right curve
-                bgCtx.bezierCurveTo(
-                    this.size / 2, 0,
-                    0, 0,
-                    0, topCurveHeight
-                );
+
+                // Gradient fill for depth
+                const grad = bgCtx.createRadialGradient(0, -s * 0.2, 0, 0, 0, s);
+                grad.addColorStop(0, this.color);
+                grad.addColorStop(0.6, this.color);
+                grad.addColorStop(1, this.darkenColor(this.color, 0.6));
+                bgCtx.fillStyle = grad;
                 bgCtx.fill();
+
+                // Subtle vein line down the center
+                bgCtx.strokeStyle = this.darkenColor(this.color, 0.7);
+                bgCtx.lineWidth = 0.5;
+                bgCtx.globalAlpha = this.opacity * 0.3;
+                bgCtx.beginPath();
+                bgCtx.moveTo(0, -s * 0.8);
+                bgCtx.quadraticCurveTo(s * 0.05, 0, 0, s * 0.5);
+                bgCtx.stroke();
+
                 bgCtx.restore();
+            }
+
+            darkenColor(hex, factor) {
+                const r = parseInt(hex.slice(1, 3), 16);
+                const g = parseInt(hex.slice(3, 5), 16);
+                const b = parseInt(hex.slice(5, 7), 16);
+                return `rgb(${Math.floor(r * factor)},${Math.floor(g * factor)},${Math.floor(b * factor)})`;
             }
         }
 
         function initFallingHearts() {
-            fallingHearts = [];
-            const count = Math.floor(width * 0.05);
+            fallingPetals = [];
+            const count = Math.floor(width * 0.04) + 10;
             for (let i = 0; i < count; i++) {
-                fallingHearts.push(new FallingHeart());
+                fallingPetals.push(new RosePetal());
             }
         }
 
         function animateBg() {
             bgCtx.clearRect(0, 0, width, height);
-            fallingHearts.forEach(h => {
-                h.update();
-                h.draw();
+
+            // Update & draw petals
+            fallingPetals.forEach(p => {
+                p.update();
+                p.draw();
             });
+
+            // Update & draw sparkles
+            sparkles = sparkles.filter(s => s.life > 0);
+            sparkles.forEach(s => {
+                s.update();
+                s.draw(bgCtx);
+            });
+
             requestAnimationFrame(animateBg);
         }
 
@@ -378,9 +645,11 @@
 
             heartCanvas.style.opacity = "1";
 
-            // Switch Cursor
-            document.body.style.cursor = 'none';
-            customCursor.style.display = 'block';
+            // Switch Cursor (only on non-touch devices)
+            if (!isTouchDevice) {
+                document.body.style.cursor = 'none';
+                activateCursorAnimation();
+            }
 
             // Start animations ONLY here
             if (!animationStarted) {
@@ -390,12 +659,22 @@
                 initParticles();
                 animateHeart();
 
-                // 2. Activate spotlight
-                spotlightActive = true;
-                animateSpotlight();
+                // 2. Activate spotlight (skip on touch devices)
+                if (!isTouchDevice) {
+                    spotlightActive = true;
+                    animateSpotlight();
+                }
 
-                // 3. Enable click to expand
-                window.addEventListener('click', expandLight);
+                // 3. Enable click to expand (or auto-expand on touch)
+                if (isTouchDevice) {
+                    // Skip spotlight & go directly to falling hearts
+                    setTimeout(() => {
+                        initFallingHearts();
+                        animateBg();
+                    }, 500);
+                } else {
+                    window.addEventListener('click', expandLight);
+                }
             }
         }
 
@@ -549,10 +828,52 @@
 
         function initParticles() {
             particles = [];
-            // Scale and center for the main heart
-            const scale = Math.min(width, height) / 35;
+            const isPortrait = height > width;
+            const smallScreen = Math.min(width, height) < 500;
+            const padding = 30;
+            const availableHeight = height - padding * 2;
             const centerX = width / 2;
-            const centerY = height / 2.5;
+
+            // Font size (needed to calculate total height)
+            const fontSize = isPortrait
+                ? (smallScreen ? width / 22 : width / 18)
+                : Math.max(Math.min(height / 18, width / 30), 14);
+
+            // Text block height: message line + gap + name line
+            const gapBetweenLines = isPortrait ? fontSize * 0.6 : fontSize * 0.8;
+            const textBlockHeight = fontSize + gapBetweenLines + fontSize * 0.8;
+
+            // Heart uses 30*scale height. Gap below heart.
+            // Total = 30*scale + gapFactor*scale + textBlockHeight
+            // Solve for max scale that fits
+            const gapFactor = isPortrait ? 0.6 : 0.8;
+            const maxScaleForHeight = (availableHeight - textBlockHeight) / (30 + gapFactor);
+
+            // Also limit by width so heart doesn't overflow horizontally (heart is 32*scale wide)
+            const maxScaleForWidth = (width - padding * 2) / 32;
+
+            // Pick desired scale, then clamp to fit
+            let desiredScale;
+            if (isPortrait) {
+                desiredScale = smallScreen ? width / 42 : width / 35;
+            } else {
+                desiredScale = Math.min(width, height) / 35;
+            }
+            const scale = Math.min(desiredScale, maxScaleForHeight, maxScaleForWidth);
+
+            // Calculate total composition height
+            const heartTopOffset = 17 * scale;
+            const heartBottomOffset = 13 * scale;
+            const heartHeight = heartTopOffset + heartBottomOffset;
+            const gapBelowHeart = scale * gapFactor;
+            const totalHeight = heartHeight + gapBelowHeart + textBlockHeight;
+
+            // Center the full composition vertically
+            const compositionTop = Math.max(padding, (height - totalHeight) / 2);
+            const centerY = compositionTop + heartTopOffset;
+
+            // Set heart zone for sparkle collision detection
+            heartZone = { cx: centerX, cy: centerY, radius: scale * 16 };
 
             // Heart Outline
             for (let t = 0; t < Math.PI * 2; t += 0.05) {
@@ -567,19 +888,23 @@
                 }
             }
 
+            // Text positions: right below heart with proper gap
+            const heartBottomY = centerY + heartBottomOffset;
+            const messageY = heartBottomY + gapBelowHeart + fontSize * 0.5;
+            const nameY = messageY + fontSize * 0.5 + gapBetweenLines + fontSize * 0.4;
+
             // Text
             const offscreen = document.createElement('canvas');
             offscreen.width = width;
             offscreen.height = height;
             const oCtx = offscreen.getContext('2d');
-            const fontSize = Math.min(width, height) / 15;
             oCtx.font = `bold ${fontSize}px 'Courier New', monospace`;
             oCtx.fillStyle = "#fff";
             oCtx.textAlign = "center";
             oCtx.textBaseline = "middle";
-            oCtx.fillText(CONFIG.customMessage, width / 2, centerY + scale * 10);
+            oCtx.fillText(CONFIG.customMessage, width / 2, messageY);
             oCtx.font = `bold ${fontSize * 0.8}px 'Courier New', monospace`;
-            oCtx.fillText(CONFIG.targetName, width / 2, centerY + scale * 15);
+            oCtx.fillText(CONFIG.targetName, width / 2, nameY);
 
             const imageData = oCtx.getImageData(0, 0, width, height).data;
             const step = 2;
@@ -613,6 +938,8 @@
             heartCanvas.height = height;
             spotlightCanvas.width = width;
             spotlightCanvas.height = height;
+            cursorCanvas.width = width;
+            cursorCanvas.height = height;
 
             // Re-init falling hearts if they are running
             if (animationStarted && !spotlightActive) {
